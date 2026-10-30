@@ -14,8 +14,7 @@ const makeToken = () => crypto.randomBytes(16).toString("hex");
 
 let game = {
   pin: String(Math.floor(100000 + Math.random() * 900000)),
-  teacherToken: makeToken(),
-  teams: [],
+teacherToken: process.env.TEACHER_TOKEN || makeToken(),  teams: [],
   round: 0,
   question: 0,
   phase: "lobby",
