@@ -1,0 +1,263 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vertical Bite Hordes</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#101b17;color:#f0f5ed;font-family:Arial,sans-serif}
+header{text-align:center;background:#193927;padding:25px 12px;border-bottom:4px solid #69bb69}
+h1{font-size:clamp(28px,5vw,48px);margin:8px 0}
+h2{color:#a7e6a3}
+main{max-width:1000px;margin:auto;padding:20px}
+.card{background:#20362b;border:1px solid #42664c;border-radius:15px;padding:20px;margin:15px 0}
+button{background:#5cac63;color:#08170b;border:0;border-radius:10px;padding:14px 20px;font-size:17px;font-weight:bold;cursor:pointer;margin:5px}
+button:hover{filter:brightness(1.15)}
+button:disabled{opacity:.4}
+input{padding:13px;border-radius:9px;border:0;font-size:18px;max-width:100%;margin:5px}
+.hidden{display:none}
+.big{font-size:30px;font-weight:bold}
+.small{color:#b6cbb9}
+.join{background:#76d98c}
+.run{background:#f0a05d}
+.wrong{background:#f18d87}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;border-bottom:1px solid #46634e;padding:12px}
+.score{font-size:28px;color:#b5ffb5;font-weight:bold}
+#leaderboard{display:grid;gap:10px}
+.horde{background:#294834;border-radius:12px;padding:15px}
+#teacherVerdict{border:2px dashed #edce73;padding:15px;border-radius:12px}
+#message{color:#ffdc8d;font-weight:bold}
+</style>
+</head>
+<body>
+<header>
+<div style="font-size:42px">🧟‍♂️ 🧟‍♀️ 🧟</div>
+<h1>VERTICAL BITE HORDES</h1>
+<div>BUILD THE BIGGEST HORDE BEFORE HALLOWEEN!</div>
+</header>
+
+<main>
+<section id="home" class="card">
+<h2>Enter the Outbreak</h2>
+<button onclick="show('studentSetup')">🧟 Join a Horde</button>
+<button onclick="show('teacherSetup')">🎃 Teacher Control</button>
+<button onclick="openDisplay()">📺 Classroom Display</button>
+</section>
+
+<section id="studentSetup" class="card hidden">
+<h2>Join your horde</h2>
+<input id="pin" placeholder="Game PIN" maxlength="6">
+<input id="hordeName" placeholder="Horde name" maxlength="25">
+<button onclick="joinGame()">Join Game</button>
+</section>
+
+<section id="teacherSetup" class="card hidden">
+<h2>Teacher Control</h2>
+<p>Teacher access stays on this device.</p>
+<button onclick="becomeTeacher()">Start Teacher Session</button>
+</section>
+
+<section id="game" class="hidden">
+<div class="card">
+<div id="status" class="big">Waiting for the outbreak...</div>
+<p id="details" class="small"></p>
+<div id="message"></div>
+</div>
+
+<div id="teacherPanel" class="card hidden">
+<h2>🎃 Teacher Controls</h2>
+<button id="startBtn" onclick="teacherStart()">Start Game</button>
+<div id="teacherVerdict">
+<p>Choose your verdict privately:</p>
+<button onclick="setVerdict('correct')">✓ Correct</button>
+<button class="wrong" onclick="setVerdict('wrong')">✕ Wrong</button>
+<p id="selectedVerdict">No verdict selected</p>
+<button onclick="teacherReveal()">REVEAL & AWARD ZOMBIES</button>
+</div>
+<button onclick="teacherNext()">Next Problem / Horde →</button>
+</div>
+
+<div id="studentPanel" class="card hidden">
+<h2>🧟 Make Your Prediction</h2>
+<p>Do you think the presenting horde's solution is correct?</p>
+<button class="join" onclick="vote('JOIN')">JOIN — Correct!</button>
+<button class="run" onclick="vote('RUN')">RUN — Wrong!</button>
+<p id="voteStatus"></p>
+</div>
+
+<div class="card">
+<h2>🧟 Horde Leaderboard</h2>
+<div id="leaderboard"></div>
+</div>
+</section>
+</main>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket=io();
+let state=null;
+let role=sessionStorage.getItem("biteRole")||"";
+let teamId=sessionStorage.getItem("biteTeam")||"";
+let teacherToken=sessionStorage.getItem("biteTeacher")||"";
+let selectedVerdict=null;
+let votedFor="";
+
+function show(id){
+document.querySelectorAll("main>section").forEach(e=>e.classList.add("hidden"));
+document.getElementById(id).classList.remove("hidden");
+}
+
+function message(text){
+document.getElementById("message").textContent=text;
+}
+
+function becomeTeacher(){
+role="teacher";
+sessionStorage.setItem("biteRole",role);
+if(!teacherToken){
+teacherToken=prompt("Enter your teacher access token:");
+if(!teacherToken)return;
+sessionStorage.setItem("biteTeacher",teacherToken);
+}
+socket.emit("teacher:login",teacherToken,result=>{
+if(!result.ok){
+alert("Invalid teacher token.");
+sessionStorage.removeItem("biteTeacher");
+teacherToken="";
+return;
+}
+show("game");
+render();
+});
+}
+
+function joinGame(){
+const pin=document.getElementById("pin").value.trim();
+const name=document.getElementById("hordeName").value.trim();
+if(!name)return alert("Enter a horde name.");
+socket.emit("team:join",{pin,name},result=>{
+if(result.error)return alert(result.error);
+teamId=result.teamId;
+role="student";
+sessionStorage.setItem("biteTeam",teamId);
+sessionStorage.setItem("biteRole",role);
+show("game");
+render();
+});
+}
+
+function openDisplay(){
+role="display";
+sessionStorage.setItem("biteRole",role);
+show("game");
+render();
+}
+
+function teacherStart(){
+socket.emit("teacher:start",teacherToken);
+}
+
+function setVerdict(verdict){
+selectedVerdict=verdict;
+socket.emit("teacher:verdict",{token:teacherToken,verdict});
+document.getElementById("selectedVerdict").textContent=
+"Selected privately: "+verdict.toUpperCase();
+}
+
+function teacherReveal(){
+if(!selectedVerdict)return alert("Select Correct or Wrong first.");
+if(!confirm("Reveal your verdict and award zombies?"))return;
+socket.emit("teacher:reveal",teacherToken);
+}
+
+function teacherNext(){
+socket.emit("teacher:next",teacherToken);
+selectedVerdict=null;
+votedFor="";
+document.getElementById("selectedVerdict").textContent="No verdict selected";
+}
+
+function vote(choice){
+if(!state||state.phase!=="voting")return;
+socket.emit("team:vote",{teamId,vote:choice});
+votedFor=choice;
+document.getElementById("voteStatus").textContent=
+"Your horde voted "+choice+"!";
+}
+
+function render(){
+if(!state)return;
+const teams=state.teams||[];
+const presenter=teams[state.round];
+const presenting=presenter&&presenter.id===teamId;
+const finished=state.phase==="finished";
+
+document.getElementById("status").textContent=
+finished?"🏆 OUTBREAK COMPLETE!":
+state.phase==="lobby"?"Waiting for hordes to join...":
+(presenter?presenter.name:"Horde")+" is presenting!";
+
+document.getElementById("details").textContent=
+"PIN: "+state.pin+" | Round "+(state.round+1)+
+" | Problem "+(state.question+1)+
+" | Votes: "+state.votesReceived+
+" | Phase: "+state.phase;
+
+document.getElementById("teacherPanel").classList.toggle("hidden",role!=="teacher");
+document.getElementById("studentPanel").classList.toggle("hidden",
+role!=="student"||presenting||state.phase!=="voting");
+
+document.getElementById("startBtn").disabled=state.phase!=="lobby";
+document.getElementById("teacherVerdict").style.display=
+state.phase==="voting"?"block":"none";
+
+if(state.phase==="revealed"){
+message("REVEALED: "+String(state.verdict).toUpperCase()+"!");
+}else if(finished){
+message("The biggest horde wins!");
+}else{
+message("");
+}
+
+document.getElementById("leaderboard").innerHTML=
+teams.slice().sort((a,b)=>b.zombies-a.zombies)
+.map((t,i)=>`
+<div class="horde">
+<div class="row">
+<strong>${i===0?"👑 ":""}${escapeHTML(t.name)}</strong>
+<span class="score">${t.zombies} 🧟</span>
+</div>
+<div>${"🧟".repeat(Math.min(20,Math.ceil(t.zombies/5)))}</div>
+</div>`).join("");
+
+if(role==="student"&&state.phase==="voting"){
+document.getElementById("voteStatus").textContent=
+votedFor?"Your horde voted "+votedFor:"Discuss, then vote!";
+}
+}
+
+function escapeHTML(str){
+return String(str).replace(/[&<>"']/g,c=>({
+"&":"&amp;","<":"&lt;",">":"&gt;",
+'"':"&quot;","'":"&#39;"
+}[c]));
+}
+
+socket.on("game:update",newState=>{
+const old=state;
+state=newState;
+if(old&&(old.round!==state.round||old.question!==state.question)){
+votedFor="";
+selectedVerdict=null;
+}
+render();
+});
+
+if(role==="display"||role==="student"){
+show("game");
+}
+</script>
+</body>
+</html>
